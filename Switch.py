@@ -33,6 +33,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.mac_to_port = {}
         self.mac_to_meter = {}
         self.n_meter = {}
+        self.port_to_meter = {}
         with open('/home/mininet/Rene/subs.json') as data_file:    
             self.subs = json.load(data_file)
         self.default_rate = 5000
@@ -58,10 +59,10 @@ class SimpleSwitch13(app_manager.RyuApp):
         #                                   ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions, 1)
 
-        
         dpid = datapath.id
         self.mac_to_meter.setdefault(dpid, {})
         self.n_meter.setdefault(dpid, 0)
+        self.port_to_meter.setdefault(dpid, {})
 
         # add resubmit flow
         inst = [parser.OFPInstructionGotoTable(1)]
@@ -159,33 +160,42 @@ class SimpleSwitch13(app_manager.RyuApp):
         src = eth.src
 
         dpid = datapath.id
-
         self.mac_to_port.setdefault(dpid, {})
-
         self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
 
+        if not src in self.port_to_meter[dpid]:
+            self.logger.debug('adding qos to port: %s', in_port)
+            self.n_meter[dpid] += 1
+            self.port_to_meter[dpid][src] = self.n_meter[dpid]
+            flow = {'meter_id': self.n_meter[dpid], 
+                    'flags': 'KBPS', 
+                    'bands':[{'type':'DROP', 'rate': self.default_rate}]}
+            cmd = ofproto.OFPMC_ADD
+            match = parser.OFPMatch(in_port=in_port)
+            thread =  threading.Thread(target=self.add_qos, args=(datapath, 1,
+                                        match, self.n_meter[dpid], flow, cmd, ))
+            thread.start()
+
         if not src in self.mac_to_meter[dpid]:
-            self.logger.debug('adding qos for: %s', src)
+            self.logger.debug('adding qos to src: %s', src)
             # searching rule
             if src in self.subs:
                 rate = self.subs[src]
                 self.n_meter[dpid] += 1
                 self.mac_to_meter[dpid][src] = self.n_meter[dpid]
                 self.logger.debug('Rate rule: %s Kbps', rate)
+                # adding meter and flow
+                cmd = ofproto.OFPMC_ADD
+                match = parser.OFPMatch(in_port=in_port, eth_src=src)
+                flow = {'meter_id': self.mac_to_meter[dpid][src], 
+                        'flags': 'KBPS', 
+                        'bands':[{'type':'DROP', 'rate': rate}]}
+                thread =  threading.Thread(target=self.add_qos, args=(datapath, 2,
+                                            match, self.n_meter[dpid], flow, cmd, ))
+                thread.start()
             else:
-                self.mac_to_meter[dpid][src] = 1
-                rate = self.default_rate
+                self.mac_to_meter[dpid][src] = 'Default'
                 self.logger.debug('Default rate')
-
-            # adding meter and flow
-            cmd = ofproto.OFPMC_ADD
-            match = parser.OFPMatch(in_port=in_port, eth_src=src)
-            flow = {'meter_id': self.mac_to_meter[dpid][src], 
-                    'flags': 'KBPS', 
-                    'bands':[{'type':'DROP', 'rate': rate}]}
-            thread =  threading.Thread(target=self.add_qos, args=(datapath, 2,
-                                        match, self.n_meter[dpid], flow, cmd, ))
-            thread.start()
 
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port
