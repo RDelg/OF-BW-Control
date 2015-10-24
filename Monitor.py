@@ -1,14 +1,9 @@
-# from ryu.app import simple_switch_13
-# class SimpleMonitor(simple_switch_13.SimpleSwitch13):
-
 from operator import attrgetter
-
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.lib import hub
-
 
 class SimpleMonitor(app_manager.RyuApp):
 
@@ -74,27 +69,19 @@ class SimpleMonitor(app_manager.RyuApp):
                          '------- '
                          '------- ')
         for stat in sorted(body, key=attrgetter('port_no')):
-            # self.logger.info('%016x %8x %8d %8d %8d %8d %8d %8d', 
-            #                  ev.msg.datapath.id, stat.port_no,
-            #                  stat.rx_packets, stat.rx_bytes, stat.rx_errors,
-            #                  stat.tx_packets, stat.tx_bytes, stat.tx_errors)
             self.port_speed[dpid].setdefault(stat.port_no, {})
-            # if not stat.port_no in self.port_speed[dpid]:
-            #     self.port_speed[dpid][stat.port_no] = {}
+
             try:
-                # self.logger.info('RX Bytes: %8d %8d', stat.rx_bytes, self.port_prev[stat.port_no]['rx'])
                 self.port_speed[dpid][stat.port_no]['rx'] = self._get_speed(stat.rx_bytes, self.port_prev[dpid][stat.port_no]['rx'], self.sleep)
                 self.port_speed[dpid][stat.port_no]['tx'] = self._get_speed(stat.tx_bytes, self.port_prev[dpid][stat.port_no]['tx'], self.sleep)
                 self.logger.info('%016x %8x %5.2f %5.2f',
                                 ev.msg.datapath.id, stat.port_no,
                                 self.port_speed[dpid][stat.port_no]['rx'],
                                 self.port_speed[dpid][stat.port_no]['tx'])
-                # self.logger.info('%8x tx %.2f Mbps',stat.port_no,self.port_speed[dpid][stat.port_no]['tx'])
             except:
                 self.logger.info('No stats')
+
             self.port_prev[dpid].setdefault(stat.port_no, {})
-            # if not stat.port_no in self.port_prev[dpid]:
-            #     self.port_prev[dpid][stat.port_no] = {}
             self.port_prev[dpid][stat.port_no]['rx'] = stat.rx_bytes
             self.port_prev[dpid][stat.port_no]['tx'] = stat.tx_bytes
 
@@ -104,7 +91,7 @@ class SimpleMonitor(app_manager.RyuApp):
         dpid = ev.msg.datapath.id
         self.logger.info('datapath         meter_id   Mbps  ')
         self.logger.info('---------------- -------- --------')
-        # meter = []
+
         for stat in sorted(body, key=attrgetter('meter_id')):
             try:
                 self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid][stat.meter_id], self.sleep)
@@ -113,13 +100,6 @@ class SimpleMonitor(app_manager.RyuApp):
                                 self.meter_speed[dpid][stat.meter_id])
             except:
                 self.logger.info('No stats')
+
             self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
-            # meters.append('meter_id=0x%08x len=%d flow_count=%d '
-            #               'packet_in_count=%d byte_in_count=%d '
-            #               'duration_sec=%d duration_nsec=%d '
-            #               'band_stats=%s' %
-            #               (stat.meter_id, stat.len, stat.flow_count,
-            #                stat.packet_in_count, stat.byte_in_count,
-            #                stat.duration_sec, stat.duration_nsec,
-            #                stat.band_stats))
-        # self.logger.debug('MeterStats: %s', meters)
+
