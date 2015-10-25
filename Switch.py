@@ -41,6 +41,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.rate_request = {}
         self.rate_allocated = {}
         self.src_port = {}
+        self.datapaths = {}
         
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
@@ -70,6 +71,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.rate_request.setdefault(dpid, {})
         self.rate_allocated.setdefault(dpid, {})
         self.src_port.setdefault(dpid, {})
+        self.datapaths[dpid] = datapath
 
         # add resubmit flow
         inst = [parser.OFPInstructionGotoTable(1)]
