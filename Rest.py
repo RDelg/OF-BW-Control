@@ -53,6 +53,7 @@ class SimpleSwitchController(ControllerBase):
 		bandwidth = {}
 		bandwidth['Requested'] = simple_switch.rate_request.get(dpid, {})
 		bandwidth['Allocated'] = simple_switch.rate_allocated.get(dpid, {})
+		bandwidth['Used'] = simple_switch.rate_used.get(dpid, {})
 		body = json.dumps(bandwidth, indent=4, sort_keys=True)
 		return Response(content_type='application/json', body=body)
 
