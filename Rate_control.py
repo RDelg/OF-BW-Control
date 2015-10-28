@@ -8,9 +8,11 @@ def rate_control(bandwith, requested, used):
 		allocated = requested
 		leftOver = bandwith - totalRequested
 	else:
+		requested = requested.copy()
 		for src in requested:
-			if int(used[src]*1.5) < requested[src]:
-				requested[src] = int(used[src]*1.5)
+			tmp = int((used.get(src, requested[src]*0.5)*1.5))
+			if tmp < requested[src]:
+				requested[src] = tmp
 			if requested[src] == 0:
 				requested[src] = 5
 		partOfWhole = int(bandwith/len(requested))

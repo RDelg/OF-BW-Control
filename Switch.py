@@ -16,7 +16,6 @@
 import json
 import threading
 from operator import attrgetter
-from Rate_control import rate_control
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, DEAD_DISPATCHER
@@ -41,11 +40,12 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.deleted_flows = {}
         with open('/home/mininet/Rene/subs.json') as data_file:    
             self.subs = json.load(data_file)
-        self.max_rate = 20000
+        self.max_rate = 200000
         self.default_rate = 5000
         self.rate_request = {}
         self.rate_allocated = {}
         self.rate_used = {}
+        self.rate_used_mod = {}
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
         self.sleep = 5
@@ -82,6 +82,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.rate_request.setdefault(dpid, {})
         self.rate_allocated.setdefault(dpid, {})
         self.rate_used.setdefault(dpid, {})
+        self.rate_used_mod.setdefault(dpid, {})
         self.deleted_flows.setdefault(dpid, {})
 
         # add resubmit flow
@@ -89,7 +90,6 @@ class SimpleSwitch13(app_manager.RyuApp):
         mod = parser.OFPFlowMod(datapath=datapath, priority=0, match=match, 
                                 instructions=inst, table_id=0)
         datapath.send_msg(mod)
-
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
                 [MAIN_DISPATCHER, DEAD_DISPATCHER])
@@ -176,10 +176,31 @@ class SimpleSwitch13(app_manager.RyuApp):
                     src = self.meter_to_src[dpid][stat.meter_id]
                     port = self.mac_to_port[dpid][src]
                     self.rate_used[dpid].setdefault(port, {})
+                    self.rate_used_mod[dpid].setdefault(port, {})
                     self.rate_used[dpid][port][src] = self.meter_speed[dpid][stat.meter_id]
+                    if (self.rate_used[dpid][port][src] >= int(self.rate_allocated[dpid][port][src]*0.7) 
+                        and (self.rate_allocated[dpid][port][src] != self.rate_request[dpid][port][src])):
+                        self.rate_used_mod[dpid][port][src] = int(self.rate_used[dpid][port][src]*1.5)
+                        thread = threading.Thread(target=self.mod_port_meters, args=(dpid, port, ))
+                        thread.start()
+                    else:
+                        self.rate_used_mod[dpid][port][src] = self.rate_used[dpid][port][src]
             except:
                 self.logger.info('No stats')
             self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
+
+    def mod_port_meters(self, dpid, in_port):
+        self.logger.debug('Datapath: %s modifying port %d meters', dpid, port)
+        datapath = self.datapaths[dpid]
+        ofproto = datapath.ofproto
+        cmd     = ofproto.OFPMC_MODIFY
+        prev_allocated = self.rate_allocated[dpid].get(in_port, {})
+        self.rate_allocated[dpid][in_port] = self.rate_control(self.max_rate, self.rate_request[dpid][in_port], self.rate_used_mod[dpid][in_port])
+        for src in self.rate_allocated[dpid][in_port]:
+            if prev_allocated.get(src, 0) != self.rate_allocated[dpid][in_port][src]:
+                rate    = self.rate_allocated[dpid][in_port][src]
+                match   = parser.OFPMatch(in_port=self.mac_to_port[dpid][src], eth_src=src)
+                self.mod_meter_entry(datapath, cmd, src_to_meter[dpid][src], rate)
 
     def mod_meter_entry(self, dp, cmd, meter_id, rate, burst_size = 0):
         rate = int(rate)
@@ -207,22 +228,22 @@ class SimpleSwitch13(app_manager.RyuApp):
                                     idle_timeout = idle_to)
         datapath.send_msg(mod)
 
-    def add_qos(self, datapath, priority, match, meter_id, rate, cmd, idle_to=0):
-        self.add_qos_meter(datapath, meter_id, rate, cmd)
+    def add_qos(self, datapath, priority, match, meter_id, rate, idle_to=0):
+        self.add_qos_meter(datapath, meter_id, rate)
         self.add_qos_flow(datapath, priority, match, meter_id, idle_to)
         self.logger.debug('qos added')
 
-    def add_qos_meter(self, datapath, meter_id, rate, cmd):
+    def add_qos_meter(self, datapath, meter_id, rate):
         ofproto = datapath.ofproto
-        parser = datapath.ofproto_parser
+        cmd     = ofproto.OFPMC_ADD
         self.mod_meter_entry(datapath, cmd, meter_id, rate)
 
     def add_qos_flow(self, datapath, priority, match, meter_id, idle_to):
         ofproto = datapath.ofproto
-        parser = datapath.ofproto_parser
-        inst = [parser.OFPInstructionMeter(meter_id), parser.OFPInstructionGotoTable(1)]
-        mod = parser.OFPFlowMod(datapath=datapath, priority=priority, flags=ofproto.OFPFF_SEND_FLOW_REM,
-                                match=match, instructions=inst, table_id=0, idle_timeout=idle_to)
+        parser  = datapath.ofproto_parser
+        inst    = [parser.OFPInstructionMeter(meter_id), parser.OFPInstructionGotoTable(1)]
+        mod     = parser.OFPFlowMod(datapath=datapath, priority=priority, flags=ofproto.OFPFF_SEND_FLOW_REM,
+                                    match=match, instructions=inst, table_id=0, idle_timeout=idle_to)
         datapath.send_msg(mod)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -254,48 +275,54 @@ class SimpleSwitch13(app_manager.RyuApp):
 
         if src not in self.port_to_meter[dpid]:
             self.logger.debug('adding qos to port: %s', in_port)
-            # self.rate_request[dpid][in_port]['Default'] = self.default_rate
             self.n_meter[dpid] += 1
             self.port_to_meter[dpid][src] = self.n_meter[dpid]
-            cmd = ofproto.OFPMC_ADD
-            match = parser.OFPMatch(in_port=in_port)
-            thread = threading.Thread(target=self.add_qos, args=(datapath, 1,
-                                    match, self.n_meter[dpid], self.default_rate, cmd, ))
+            match   = parser.OFPMatch(in_port=in_port)
+            # run thread to avoid performance decreasing
+            thread  = threading.Thread(target=self.add_qos, 
+                                    args=(datapath, 1, match, 
+                                    self.n_meter[dpid], 
+                                    self.default_rate, ))
             thread.start()
 
-        # search rule
+        # search if there is a rule for the src
         if src in self.subs:
-            if src not in self.rate_request[dpid][in_port]:
+            # search if there is a existing meter already
+            if src not in self.src_to_meter[dpid]:
+                # recalculate rate allocated to in_port
                 self.rate_request[dpid][in_port][src] = int(self.subs[src])
                 prev_allocated = self.rate_allocated[dpid].get(in_port, {})
-                self.rate_allocated[dpid][in_port] = self.rate_control(self.max_rate, self.rate_request[dpid][in_port])
+                self.rate_allocated[dpid][in_port] = self.rate_control(self.max_rate, self.rate_request[dpid][in_port], self.rate_used_mod[dpid].get(in_port, {}))
+                self.logger.debug('requested %s', self.rate_request[dpid][in_port])
+                self.logger.debug('used %s', self.rate_used_mod[dpid].get(in_port, {}))
+                self.logger.debug('allocated %s', self.rate_allocated[dpid][in_port])
                 # add meter and flow
                 self.logger.debug('adding qos to src: %s', src)
-                cmd = ofproto.OFPMC_ADD
                 self.n_meter[dpid] += 1
                 self.src_to_meter[dpid][src] = self.n_meter[dpid]
                 self.meter_to_src[dpid][self.n_meter[dpid]] = src
-                rate = self.rate_allocated[dpid][in_port][src]
-                match = parser.OFPMatch(in_port=in_port, eth_src=src)
-                thread =  threading.Thread(target=self.add_qos, args=(datapath, 2,
-                                            match, self.n_meter[dpid], rate, cmd, ),
+                rate    = self.rate_allocated[dpid][in_port][src]
+                match   = parser.OFPMatch(in_port=in_port, eth_src=src)
+                # run thread to avoid performance decreasing
+                thread  = threading.Thread(target=self.add_qos, args=(datapath, 2, match, self.n_meter[dpid], rate, ),
                                             kwargs=dict(idle_to=30))
                 thread.start()
+                # modify the others in_port's meters 
+                for src2 in self.rate_allocated[dpid][in_port]:
+                    if src != src2 and  prev_allocated.get(src2, 0) != self.rate_allocated[dpid][in_port][src2]:
+                        self.logger.debug('modifying qos to src: %s', src2)
+                        cmd     = ofproto.OFPMC_MODIFY
+                        rate    = self.rate_allocated[dpid][in_port][src2]
+                        match   = parser.OFPMatch(in_port=self.mac_to_port[dpid][src2], eth_src=src2)
+                        # run thread to avoid performance decreasing
+                        thread  = threading.Thread(target=self.mod_meter_entry, args=(datapath, cmd, src_to_meter[dpid][src2], rate))
+                        thread.start()
 
             elif src in self.src_to_meter[dpid] and self.deleted_flows[dpid].get(src, False) == True:
+                # rewrite qos flow
+                self.deleted_flows[dpid][src] = False
                 match = parser.OFPMatch(in_port=in_port, eth_src=src)
                 self.add_qos_flow(datapath, 2, match, self.src_to_meter[dpid][src], idle_to=30)
-                self.deleted_flows[dpid][src] = False
-
-            for src2 in self.rate_allocated[dpid][in_port]:
-                if src != src2 and  prev_allocated.get(src2, 0) != self.rate_allocated[dpid][in_port][src2]:
-                    cmd = ofproto.OFPMC_MODIFY
-                    rate = self.rate_allocated[dpid][in_port][src]
-                    match = parser.OFPMatch(in_port=in_port, eth_src=src)
-                    self.logger.debug('B: modifying qos to src: %s', src2)
-                    thread =  threading.Thread(target=self.mod_meter_entry, 
-                        args=(datapath, cmd, src_to_meter[dpid][src2],rate))
-                    thread.start()
 
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port
@@ -358,39 +385,46 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.deleted_flows[dpid][src] = True
         self.logger.debug("Matches eth_src: %s in_port: %s", src, msg.match.get('in_port', 0))
 
-    def rate_control(self, bandwith, request):
+    def rate_control(self, bandwith, requested, used):
         allocated = {}
-        totalRequest = sum(request.values())
+        totalRequested = sum(requested.values())
+        totalUsed = sum(used.values())
         partOfWhole = 0
         leftOver = 0
-        # print "Requested %d of %d maximum bandwith" %(totalRequest, bandwith)
-        if totalRequest < bandwith:
-            allocated = request
-            leftOver = bandwith - totalRequest
+        if totalRequested < bandwith:
+            allocated = requested
+            leftOver = bandwith - totalRequested
         else:
-            partOfWhole = int(bandwith/len(request))
-            leftOver = bandwith % len(request)
-            for src in request:
-                if partOfWhole > request[src]:
-                    allocated[src] = request[src]
-                    leftOver += partOfWhole - request[src]
+            requested = requested.copy()
+            for src in requested:
+                tmp = int((used.get(src, requested[src]*0.5)*1.5))
+                if tmp < requested[src]:
+                    requested[src] = tmp
+                if requested[src] == 0:
+                    requested[src] = 5
+            partOfWhole = int(bandwith/len(requested))
+            leftOver = bandwith % len(requested)
+            for src in requested:
+                if partOfWhole > requested[src]:
+                    allocated[src] = requested[src]
+                    leftOver += partOfWhole - requested[src]
                 else:
                     allocated[src] = partOfWhole
             while leftOver > 0:
                 stillNeed = 0
-                for src in request:
-                    if (request[src] - allocated[src]) > 0:
+                for src in requested:
+                    if (requested[src] - allocated[src]) > 0:
                         stillNeed += 1
                 if stillNeed < leftOver:
-                    for src in request:
-                        if (request[src] - allocated[src]) > 0:
+                    for src in requested:
+                        if (requested[src] - allocated[src]) > 0:
                              allocated[src]+=1
                              leftOver-=1
                 else:
                     maxDiff = 0
-                    for src in request:
-                        if request[src] - allocated[src] > maxDiff:
-                            maxDiff = request[src] - allocated[src]
+                    for src in requested:
+                        if requested[src] - allocated[src] > maxDiff:
+                            maxDiff = requested[src] - allocated[src]
                             tempI = src
                     allocated[tempI] += 1
                     leftOver -= 1
