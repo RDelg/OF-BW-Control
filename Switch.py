@@ -144,17 +144,13 @@ class SimpleSwitch13(app_manager.RyuApp):
                          '------- ')
         for stat in sorted(body, key=attrgetter('port_no')):
             self.port_speed[dpid].setdefault(stat.port_no, {})
-
-            try:
-                self.port_speed[dpid][stat.port_no]['rx'] = self._get_speed(stat.rx_bytes, self.port_prev[dpid][stat.port_no]['rx'], self.sleep)
-                self.port_speed[dpid][stat.port_no]['tx'] = self._get_speed(stat.tx_bytes, self.port_prev[dpid][stat.port_no]['tx'], self.sleep)
-                self.logger.info('%016x %8x %5.2f %5.2f',
-                                ev.msg.datapath.id, stat.port_no,
-                                self.port_speed[dpid][stat.port_no]['rx'],
-                                self.port_speed[dpid][stat.port_no]['tx'])
-            except:
-                self.logger.info('No stats')
-
+            tmp = self.port_prev[dpid].get(stat.port_no, {'rx':0, 'tx':0})
+            self.port_speed[dpid][stat.port_no]['rx'] = self._get_speed(stat.rx_bytes, tmp['rx'], self.sleep)
+            self.port_speed[dpid][stat.port_no]['tx'] = self._get_speed(stat.tx_bytes, tmp['tx'], self.sleep)
+            self.logger.info('%016x %8x %5.2f %5.2f',
+                            ev.msg.datapath.id, stat.port_no,
+                            self.port_speed[dpid][stat.port_no]['rx'],
+                            self.port_speed[dpid][stat.port_no]['tx'])
             self.port_prev[dpid].setdefault(stat.port_no, {})
             self.port_prev[dpid][stat.port_no]['rx'] = stat.rx_bytes
             self.port_prev[dpid][stat.port_no]['tx'] = stat.tx_bytes
@@ -167,26 +163,21 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.logger.info('---------------- -------- --------')
 
         for stat in sorted(body, key=attrgetter('meter_id')):
-            try:
-                self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid][stat.meter_id], self.sleep)
-                self.logger.info("%016x %08x %5.2f",
-                                dpid, stat.meter_id, 
-                                self.meter_speed[dpid][stat.meter_id])
-                if stat.meter_id in self.meter_to_src[dpid]:
-                    src = self.meter_to_src[dpid][stat.meter_id]
-                    port = self.mac_to_port[dpid][src]
-                    self.rate_used[dpid].setdefault(port, {})
-                    self.rate_used_mod[dpid].setdefault(port, {})
-                    self.rate_used[dpid][port][src] = self.meter_speed[dpid][stat.meter_id]
-                    if (self.rate_used[dpid][port][src] >= int(self.rate_allocated[dpid][port][src]*0.7) 
-                        and (self.rate_allocated[dpid][port][src] != self.rate_request[dpid][port][src])):
-                        self.rate_used_mod[dpid][port][src] = int(self.rate_used[dpid][port][src]*1.5)
-                        thread = threading.Thread(target=self.mod_port_meters, args=(dpid, port, ))
-                        thread.start()
-                    else:
-                        self.rate_used_mod[dpid][port][src] = self.rate_used[dpid][port][src]
-            except:
-                self.logger.info('No stats')
+            self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, 0), self.sleep)
+            self.logger.info("%016x %08x %5.2f",dpid, stat.meter_id, self.meter_speed[dpid].get(stat.meter_id, 0))
+            if stat.meter_id in self.meter_to_src[dpid]:
+                src = self.meter_to_src[dpid][stat.meter_id]
+                port = self.mac_to_port[dpid][src]
+                self.rate_used[dpid].setdefault(port, {})
+                self.rate_used_mod[dpid].setdefault(port, {})
+                self.rate_used[dpid][port][src] = self.meter_speed[dpid][stat.meter_id]
+                if (self.rate_used[dpid][port][src] >= int(self.rate_allocated[dpid][port][src]*0.7) 
+                    and (self.rate_allocated[dpid][port][src] != self.rate_request[dpid][port][src])):
+                    self.rate_used_mod[dpid][port][src] = int(self.rate_used[dpid][port][src]*1.5)
+                    thread = threading.Thread(target=self.mod_port_meters, args=(dpid, port, ))
+                    thread.start()
+                else:
+                    self.rate_used_mod[dpid][port][src] = self.rate_used[dpid][port][src]
             self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
 
     def mod_port_meters(self, dpid, in_port):
@@ -253,11 +244,12 @@ class SimpleSwitch13(app_manager.RyuApp):
         if ev.msg.msg_len < ev.msg.total_len:
             self.logger.debug("packet truncated: only %s of %s bytes",
                               ev.msg.msg_len, ev.msg.total_len)
-        msg = ev.msg
+        msg      = ev.msg
         datapath = msg.datapath
-        ofproto = datapath.ofproto
-        parser = datapath.ofproto_parser
-        in_port = msg.match['in_port']
+        dpid     = datapath.id
+        ofproto  = datapath.ofproto
+        parser   = datapath.ofproto_parser
+        in_port  = msg.match['in_port']
 
         pkt = packet.Packet(msg.data)
         eth = pkt.get_protocols(ethernet.ethernet)[0]
@@ -268,15 +260,16 @@ class SimpleSwitch13(app_manager.RyuApp):
         dst = eth.dst
         src = eth.src
 
-        dpid = datapath.id
         self.mac_to_port.setdefault(dpid, {})
         self.rate_request[dpid].setdefault(in_port, {})
         self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
 
-        if src not in self.port_to_meter[dpid]:
+        # search if it is a new in_port
+        if in_port not in self.port_to_meter[dpid]:
+            # add in_port's default meter
             self.logger.debug('adding qos to port: %s', in_port)
             self.n_meter[dpid] += 1
-            self.port_to_meter[dpid][src] = self.n_meter[dpid]
+            self.port_to_meter[dpid][in_port] = self.n_meter[dpid]
             match   = parser.OFPMatch(in_port=in_port)
             # run thread to avoid performance decreasing
             thread  = threading.Thread(target=self.add_qos, 
