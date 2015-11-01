@@ -23,7 +23,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.port_to_meter = {}
         with open('/home/mininet/Rene/subs.json') as data_file:    
             self.subs = json.load(data_file)
-        self.max_rate = 200000
+        self.max_rate = 40000
         self.default_rate = 5000
         self.rate_request = {}
         self.rate_allocated = {}
@@ -45,7 +45,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         
         # install table-miss flow entry
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
-                                         ofproto.OFPCML_MAX)]  
+                                         ofproto.OFPCML_NO_BUFFER)]  
         match = parser.OFPMatch()
         self._add_flow(datapath, 0, match, actions, 1)
 
@@ -133,24 +133,24 @@ class SimpleSwitch13(app_manager.RyuApp):
                 if (self.rate_used[dpid][port][src] >= int(self.rate_allocated[dpid][port][src]*0.7) 
                     and (self.rate_allocated[dpid][port][src] != self.rate_request[dpid][port][src])):
                     self.rate_used_mod[dpid][port][src] = int(self.rate_used[dpid][port][src]*1.5)
-                    thread = threading.Thread(target=self._mod_port_meters, args=(dpid, port, ))
-                    thread.start()
+                    hub.spawn(self._mod_port_meters, dpid, port)
                 else:
                     self.rate_used_mod[dpid][port][src] = self.rate_used[dpid][port][src]
             self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
 
     def _mod_port_meters(self, dpid, in_port):
-        self.logger.debug('Datapath: %s modifying port %d meters', dpid, port)
+        self.logger.debug('Datapath: %s modifying port %d meters', dpid, in_port)
         datapath = self.datapaths[dpid]
-        ofproto = datapath.ofproto
-        cmd     = ofproto.OFPMC_MODIFY
+        ofproto  = datapath.ofproto
+        parser   = datapath.ofproto_parser
+        cmd      = ofproto.OFPMC_MODIFY
         prev_allocated = self.rate_allocated[dpid].get(in_port, {})
         self.rate_allocated[dpid][in_port] = self._rate_control(self.max_rate, self.rate_request[dpid][in_port], self.rate_used_mod[dpid][in_port])
         for src in self.rate_allocated[dpid][in_port]:
             if prev_allocated.get(src, 0) != self.rate_allocated[dpid][in_port][src]:
                 rate    = self.rate_allocated[dpid][in_port][src]
                 match   = parser.OFPMatch(in_port=self.mac_to_port[dpid][src], eth_src=src)
-                self._mod_meter_entry(datapath, cmd, src_to_meter[dpid][src], rate)
+                self._mod_meter_entry(datapath, cmd, self.src_to_meter[dpid][src], rate)
 
     def _mod_meter_entry(self, dp, cmd, meter_id, rate, burst_size = 0):
         flags = dp.ofproto.OFPMF_KBPS
@@ -290,7 +290,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                 cmd     = ofproto.OFPMC_MODIFY
                 rate    = self.rate_allocated[dpid][in_port][src2]
                 match   = parser.OFPMatch(in_port=self.mac_to_port[dpid][src2], eth_src=src2)
-                self._mod_meter_entry(datapath, cmd, src_to_meter[dpid][src2], rate)
+                self._mod_meter_entry(datapath, cmd, self.src_to_meter[dpid][src2], rate)
 
     def _rate_control(self, bandwith, requested, used):
         allocated = {}
@@ -302,13 +302,14 @@ class SimpleSwitch13(app_manager.RyuApp):
             allocated = requested
             leftOver = bandwith - totalRequested
         else:
+            requested_base = requested
             requested = requested.copy()
             for src in requested:
                 tmp = int((used.get(src, requested[src]*0.5)*1.5))
                 if tmp < requested[src]:
                     requested[src] = tmp
-                if requested[src] == 0:
-                    requested[src] = 5
+                if requested[src] < 5000:
+                    requested[src] = 5000
             partOfWhole = int(bandwith/len(requested))
             leftOver = bandwith % len(requested)
             for src in requested:
@@ -320,19 +321,21 @@ class SimpleSwitch13(app_manager.RyuApp):
             while leftOver > 0:
                 stillNeed = 0
                 for src in requested:
-                    if (requested[src] - allocated[src]) > 0:
+                    if (requested_base[src] - allocated[src]) > 0:
                         stillNeed += 1
                 if stillNeed < leftOver:
                     for src in requested:
-                        if (requested[src] - allocated[src]) > 0:
+                        if (requested_base[src] - allocated[src]) > 0:
                              allocated[src]+=1
                              leftOver-=1
                 else:
                     maxDiff = 0
+                    tempI = None
                     for src in requested:
-                        if requested[src] - allocated[src] > maxDiff:
+                        if requested[src] - allocated[src] >= maxDiff:
                             maxDiff = requested[src] - allocated[src]
                             tempI = src
+                            self.logger.debug('SRC: %s', tempI)
                     allocated[tempI] += 1
                     leftOver -= 1
         return allocated
