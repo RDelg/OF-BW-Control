@@ -36,6 +36,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.port_prev = {}
         self.meter_speed = {}
         self.meter_prev = {}
+        self.time_prev = {}
         
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def _switch_features_handler(self, ev):
@@ -68,6 +69,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                 self.port_prev[datapath.id]     = {}
                 self.meter_speed[datapath.id]   = {}
                 self.meter_prev[datapath.id]    = {}
+                self.time_prev[datapath.id]     = {}
                 # Switch dictionaries
                 self.n_meter[datapath.id]       = 0
                 self.mac_to_port[datapath.id]   = {}
@@ -87,6 +89,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                 del self.port_prev[datapath.id]
                 del self.meter_speed[datapath.id]
                 del self.meter_prev[datapath.id]
+                del self.time_prev[datapath.id]
                 # Deleting switch dictionaries
                 del self.mac_to_port[datapath.id]
                 del self.n_meter[datapath.id]
@@ -121,8 +124,16 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.logger.info('datapath         meter_id   Kbps  ')
         self.logger.info('---------------- -------- --------')
 
+
         for stat in sorted(body, key=attrgetter('meter_id')):
-            self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, 0), self.sleep)
+            if stat.meter_id in self.time_prev[dpid]:
+                sleep = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9) - self.time_prev[dpid][stat.meter_id]
+            else:
+                sleep = self.sleep
+            self.time_prev[dpid][stat.meter_id] = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9)
+
+            self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, 0), sleep)
+            self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
             self.logger.info("%016x %08x %6.1f",dpid, stat.meter_id, self.meter_speed[dpid].get(stat.meter_id, 0))
             if stat.meter_id in self.meter_to_src[dpid]:
                 src = self.meter_to_src[dpid][stat.meter_id]
@@ -136,7 +147,6 @@ class SimpleSwitch13(app_manager.RyuApp):
                     hub.spawn(self._mod_port_meters, dpid, port)
                 else:
                     self.rate_used_mod[dpid][port][src] = self.rate_used[dpid][port][src]
-            self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
 
     def _mod_port_meters(self, dpid, in_port):
         self.logger.debug('Datapath: %s modifying port %d meters', dpid, in_port)
@@ -298,44 +308,49 @@ class SimpleSwitch13(app_manager.RyuApp):
         totalUsed = sum(used.values())
         partOfWhole = 0
         leftOver = 0
+        minRate = 5000
         if totalRequested < bandwith:
             allocated = requested
             leftOver = bandwith - totalRequested
         else:
-            requested_base = requested
-            requested = requested.copy()
+            requestedMod = requested.copy()
+            defaultRate = []
             for src in requested:
                 tmp = int((used.get(src, requested[src]*0.5)*1.5))
-                if tmp < requested[src]:
-                    requested[src] = tmp
-                if requested[src] < 5000:
-                    requested[src] = 5000
-            partOfWhole = int(bandwith/len(requested))
-            leftOver = bandwith % len(requested)
-            for src in requested:
-                if partOfWhole > requested[src]:
-                    allocated[src] = requested[src]
-                    leftOver += partOfWhole - requested[src]
-                else:
-                    allocated[src] = partOfWhole
-            while leftOver > 0:
-                stillNeed = 0
-                for src in requested:
-                    if (requested_base[src] - allocated[src]) > 0:
-                        stillNeed += 1
-                if stillNeed < leftOver:
-                    for src in requested:
-                        if (requested_base[src] - allocated[src]) > 0:
-                             allocated[src]+=1
-                             leftOver-=1
-                else:
-                    maxDiff = 0
-                    tempI = None
-                    for src in requested:
-                        if requested[src] - allocated[src] >= maxDiff:
-                            maxDiff = requested[src] - allocated[src]
-                            tempI = src
-                            self.logger.debug('SRC: %s', tempI)
-                    allocated[tempI] += 1
-                    leftOver -= 1
+                if tmp < requestedMod[src]:
+                    requestedMod[src] = tmp
+                if requestedMod[src] < minRate:
+                    requestedMod[src] = minRate
+                    defaultRate.append(src)
+            totalRequested = sum(requestedMod.values())
+            if totalRequested < bandwith:
+                allocated = requestedMod
+                leftOver = bandwith - totalRequested
+            else:
+                partOfWhole = int(bandwith/len(requestedMod))
+                leftOver = bandwith % len(requestedMod)
+                for src in requestedMod:
+                    if partOfWhole > requestedMod[src]:
+                        allocated[src] = requestedMod[src]
+                        leftOver += partOfWhole - requestedMod[src]
+                    else:
+                        allocated[src] = partOfWhole
+                while leftOver > 0:
+                    stillNeed = 0
+                    for src in requestedMod:
+                        if (requested[src] - allocated[src]) > 0:
+                            stillNeed += 1
+                    if stillNeed < leftOver:
+                        for src in requestedMod:
+                            if requested[src] - allocated[src] > 0 and src not in defaultRate:
+                                 allocated[src]+=1
+                                 leftOver-=1
+                    else:
+                        maxDiff = 0
+                        for src in requested:
+                            if requested[src] - allocated[src] > maxDiff and src not in defaultRate:
+                                maxDiff = requested[src] - allocated[src]
+                                tempI = src
+                        allocated[tempI] += 1
+                        leftOver -= 1
         return allocated
