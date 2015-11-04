@@ -32,8 +32,6 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
         self.sleep = 5
-        self.port_speed = {}
-        self.port_prev = {}
         self.meter_speed = {}
         self.meter_prev = {}
         self.time_prev = {}
@@ -65,12 +63,10 @@ class SimpleSwitch13(app_manager.RyuApp):
                 self.logger.debug('register datapath: %016x', datapath.id)
                 self.datapaths[datapath.id] = datapath
                 # Datapath's dictionaries for BW measurement
-                self.port_speed[datapath.id]    = {}
-                self.port_prev[datapath.id]     = {}
                 self.meter_speed[datapath.id]   = {}
                 self.meter_prev[datapath.id]    = {}
                 self.time_prev[datapath.id]     = {}
-                # Switch dictionaries
+                # Switch's dictionaries
                 self.n_meter[datapath.id]       = 0
                 self.mac_to_port[datapath.id]   = {}
                 self.src_to_meter[datapath.id]  = {}
@@ -85,12 +81,10 @@ class SimpleSwitch13(app_manager.RyuApp):
                 self.logger.debug('unregister datapath: %016x', datapath.id)
                 # Deleting datapath's dictionaries
                 del self.datapaths[datapath.id]
-                del self.port_speed[datapath.id]
-                del self.port_prev[datapath.id]
                 del self.meter_speed[datapath.id]
                 del self.meter_prev[datapath.id]
                 del self.time_prev[datapath.id]
-                # Deleting switch dictionaries
+                # Deleting switch's dictionaries
                 del self.mac_to_port[datapath.id]
                 del self.n_meter[datapath.id]
                 del self.src_to_meter[datapath.id]
@@ -199,8 +193,13 @@ class SimpleSwitch13(app_manager.RyuApp):
         ofproto = datapath.ofproto
         parser  = datapath.ofproto_parser
         inst    = [parser.OFPInstructionMeter(meter_id), parser.OFPInstructionGotoTable(1)]
-        mod     = parser.OFPFlowMod(datapath=datapath, priority=priority, match=match, 
+        if idle_to == 0:
+            mod     = parser.OFPFlowMod(datapath=datapath, priority=priority, match=match, 
                                     instructions=inst, table_id=0, idle_timeout=idle_to)
+        else:
+            mod     = parser.OFPFlowMod(datapath=datapath, priority=priority, match=match, 
+                                    flags=ofproto.OFPFF_SEND_FLOW_REM, instructions=inst, 
+                                    table_id=0, idle_timeout=idle_to)
         datapath.send_msg(mod)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -291,7 +290,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.meter_to_src[dpid][self.n_meter[dpid]] = src
         rate    = self.rate_allocated[dpid][in_port][src]
         match   = parser.OFPMatch(in_port=in_port, eth_src=src)
-        self._add_qos(datapath, 2, match, self.n_meter[dpid], rate)
+        self._add_qos(datapath, 2, match, self.n_meter[dpid], rate, 30)
 
         # modify the others in_port's meters 
         for src2 in self.rate_allocated[dpid][in_port]:
@@ -310,7 +309,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         leftOver = 0
         minRate = 5000
         if totalRequested < bandwith:
-            allocated = requested
+            allocated = requested.copy()
             leftOver = bandwith - totalRequested
         else:
             requestedMod = requested.copy()
@@ -354,3 +353,54 @@ class SimpleSwitch13(app_manager.RyuApp):
                         allocated[tempI] += 1
                         leftOver -= 1
         return allocated
+
+
+    @set_ev_cls(ofp_event.EventOFPFlowRemoved, MAIN_DISPATCHER)
+    def flow_removed_handler(self, ev):
+        msg = ev.msg
+        dp = msg.datapath
+        dpid = dp.id
+        ofp = dp.ofproto
+        parser  = dp.ofproto_parser
+
+        src = msg.match.get('eth_src', None)
+        in_port = msg.match.get('in_port', None)
+        mid = self.src_to_meter[dpid][src]
+
+        del self.meter_speed[dpid][mid]
+        del self.meter_prev[dpid][mid]
+        del self.time_prev[dpid][mid]
+
+        del self.mac_to_port[dpid][src]
+        del self.meter_to_src[dpid][mid]
+        del self.src_to_meter[dpid][src]
+        del self.rate_request[dpid][in_port][src]
+        del self.rate_allocated[dpid][in_port][src]
+        del self.rate_used[dpid][in_port][src]
+        del self.rate_used_mod[dpid][in_port][src]
+
+
+        cmd = ofp.OFPMC_DELETE
+        self._mod_meter_entry(dp, cmd, mid, 0)
+
+        if msg.reason == ofp.OFPRR_IDLE_TIMEOUT:
+            reason = 'IDLE TIMEOUT'
+        elif msg.reason == ofp.OFPRR_HARD_TIMEOUT:
+            reason = 'HARD TIMEOUT'
+        elif msg.reason == ofp.OFPRR_DELETE:
+            reason = 'DELETE'
+        elif msg.reason == ofp.OFPRR_GROUP_DELETE:
+            reason = 'GROUP DELETE'
+        else:
+            reason = 'unknown'
+
+        self.logger.debug('OFPFlowRemoved received: '
+                          'cookie=%d priority=%d reason=%s table_id=%d '
+                          'duration_sec=%d duration_nsec=%d '
+                          'idle_timeout=%d hard_timeout=%d '
+                          'packet_count=%d byte_count=%d match.fields=%s',
+                          msg.cookie, msg.priority, reason, msg.table_id,
+                          msg.duration_sec, msg.duration_nsec,
+                          msg.idle_timeout, msg.hard_timeout,
+                          msg.packet_count, msg.byte_count, msg.match)
+
