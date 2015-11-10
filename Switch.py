@@ -267,7 +267,7 @@ class SimpleSwitch13(app_manager.RyuApp):
 
         # install a flow to avoid packet_in next time
         if out_port != ofproto.OFPP_FLOOD:
-            match = parser.OFPMatch(in_port=in_port, eth_dst=dst)
+            match = parser.OFPMatch(in_port=in_port, eth_src=src, eth_dst=dst)
             # verify if we have a valid buffer_id, if yes avoid to send both
             # flow_mod & packet_out
             if msg.buffer_id != ofproto.OFP_NO_BUFFER:
@@ -376,15 +376,12 @@ class SimpleSwitch13(app_manager.RyuApp):
         del self.meter_speed[dpid][mid]
         del self.meter_prev[dpid][mid]
         del self.time_prev[dpid][mid]
-
-        del self.mac_to_port[dpid][src]
         del self.meter_to_src[dpid][mid]
         del self.src_to_meter[dpid][src]
         del self.rate_request[dpid][in_port][src]
         del self.rate_allocated[dpid][in_port][src]
         del self.rate_used[dpid][in_port][src]
         del self.rate_used_mod[dpid][in_port][src]
-
 
         cmd = ofp.OFPMC_DELETE
         self._mod_meter_entry(dp, cmd, mid, 0)
