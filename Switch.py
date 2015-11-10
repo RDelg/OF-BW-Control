@@ -1,4 +1,5 @@
 import json
+from threading import Thread, Timer
 from operator import attrgetter
 from ryu.base import app_manager
 from ryu.controller import ofp_event
@@ -236,7 +237,10 @@ class SimpleSwitch13(app_manager.RyuApp):
             self.port_to_meter[dpid][in_port] = self.n_meter[dpid]
             match   = parser.OFPMatch(in_port=in_port)
             # run thread to avoid performance decreasing
-            hub.spawn(self._add_qos, datapath, 1, match, self.n_meter[dpid], self.default_rate)
+            # hub.spawn(self._add_qos, datapath, 1, match, self.n_meter[dpid], self.default_rate)
+            t1 = Timer(0.5, self._add_qos, args=[datapath, 1, match, self.n_meter[dpid], self.default_rate])
+            t1.start()
+
 
         # search if there is a rule for the src
         if src in self.subs:
@@ -244,7 +248,12 @@ class SimpleSwitch13(app_manager.RyuApp):
             if src not in self.src_to_meter[dpid]:
                 # thread = threading.Thread(target=self._new_sub, args=(datapath, src, in_port, ))
                 # thread.start()
-                hub.spawn(self._new_sub, datapath, src, in_port )
+                self.n_meter[dpid] += 1
+                self.src_to_meter[dpid][src] = self.n_meter[dpid]
+                self.meter_to_src[dpid][self.n_meter[dpid]] = src
+                # hub.spawn(self._new_sub, datapath, src, in_port )
+                t2 = Timer(0.5, self._new_sub, args=[datapath, src, in_port])
+                t2.start()
 
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port
@@ -285,12 +294,9 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.rate_allocated[dpid][in_port] = self._rate_control(self.max_rate, self.rate_request[dpid][in_port], self.rate_used_mod[dpid].get(in_port, {}))
         # add meter and flow
         self.logger.debug('adding qos to src: %s', src)
-        self.n_meter[dpid] += 1
-        self.src_to_meter[dpid][src] = self.n_meter[dpid]
-        self.meter_to_src[dpid][self.n_meter[dpid]] = src
         rate    = self.rate_allocated[dpid][in_port][src]
         match   = parser.OFPMatch(in_port=in_port, eth_src=src)
-        self._add_qos(datapath, 2, match, self.n_meter[dpid], rate, 30)
+        self._add_qos(datapath, 2, match, self.src_to_meter[dpid][src], rate, 30)
 
         # modify the others in_port's meters 
         for src2 in self.rate_allocated[dpid][in_port]:
