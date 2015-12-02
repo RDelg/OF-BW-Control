@@ -150,7 +150,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         parser   = datapath.ofproto_parser
         cmd      = ofproto.OFPMC_MODIFY
         prev_allocated = self.rate_allocated[dpid].get(in_port, {})
-        self.rate_allocated[dpid][in_port] = self._rate_control(self.max_rate, self.rate_request[dpid][in_port], self.rate_used_mod[dpid][in_port])
+        self.rate_allocated[dpid][in_port] = self._rate_control(dpid, in_port)
         for src in self.rate_allocated[dpid][in_port]:
             if prev_allocated.get(src, 0) != self.rate_allocated[dpid][in_port][src]:
                 rate    = self.rate_allocated[dpid][in_port][src]
@@ -291,7 +291,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         # recalculate rate allocated to in_port
         self.rate_request[dpid][in_port][src] = int(self.subs[src])
         prev_allocated = self.rate_allocated[dpid].get(in_port, {})
-        self.rate_allocated[dpid][in_port] = self._rate_control(self.max_rate, self.rate_request[dpid][in_port], self.rate_used_mod[dpid].get(in_port, {}))
+        self.rate_allocated[dpid][in_port] = self._rate_control(dpid, in_port)
         # add meter and flow
         self.logger.debug('adding qos to src: %s', src)
         rate    = self.rate_allocated[dpid][in_port][src]
@@ -307,7 +307,10 @@ class SimpleSwitch13(app_manager.RyuApp):
                 match   = parser.OFPMatch(in_port=self.mac_to_port[dpid][src2], eth_src=src2)
                 self._mod_meter_entry(datapath, cmd, self.src_to_meter[dpid][src2], rate)
 
-    def _rate_control(self, bandwith, requested, used):
+    def _rate_control(self, dpid, in_port):
+        bandwith = self.max_rate
+        requested = self.rate_request[dpid][in_port]
+        used = self.rate_used_mod[dpid].get(in_port, {})
         allocated = {}
         totalRequested = sum(requested.values())
         totalUsed = sum(used.values())
