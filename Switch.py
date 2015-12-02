@@ -324,7 +324,9 @@ class SimpleSwitch13(app_manager.RyuApp):
             requestedMod = requested.copy()
             defaultRate = []
             for src in requested:
-                requestedMod[src] = int((used.get(src, requested[src]*0.5/1.5)*1.5))
+                tmp = int((used.get(src, requested[src]*0.5/1.5)*1.5))
+                if tmp < requested[src]:
+                    requestedMod[src] = tmp
                 if requestedMod[src] < minRate:
                     requestedMod[src] = minRate
                     defaultRate.append(src)
