@@ -116,7 +116,7 @@ class SimpleSwitch13(app_manager.RyuApp):
     def _meter_stats_reply_handler(self, ev):
         body = ev.msg.body
         dpid = ev.msg.datapath.id
-        self.logger.info('datapath         meter_id   Kbps  ')
+        self.logger.info('datapath         meter_id   kbps  ')
         self.logger.info('---------------- -------- --------')
 
 
@@ -195,10 +195,10 @@ class SimpleSwitch13(app_manager.RyuApp):
         parser  = datapath.ofproto_parser
         inst    = [parser.OFPInstructionMeter(meter_id), parser.OFPInstructionGotoTable(1)]
         if idle_to == 0:
-            mod     = parser.OFPFlowMod(datapath=datapath, priority=priority, match=match, 
+            mod = parser.OFPFlowMod(datapath=datapath, priority=priority, match=match, 
                                     instructions=inst, table_id=0, idle_timeout=idle_to)
         else:
-            mod     = parser.OFPFlowMod(datapath=datapath, priority=priority, match=match, 
+            mod = parser.OFPFlowMod(datapath=datapath, priority=priority, match=match, 
                                     flags=ofproto.OFPFF_SEND_FLOW_REM, instructions=inst, 
                                     table_id=0, idle_timeout=idle_to)
         datapath.send_msg(mod)
@@ -229,29 +229,24 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.rate_request[dpid].setdefault(in_port, {})
         self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
 
-        # search if it is a new in_port
+        # search if it is from a new in_port
         if in_port not in self.port_to_meter[dpid]:
             # add in_port's default meter
             self.logger.debug('adding qos to port: %s', in_port)
             self.n_meter[dpid] += 1
             self.port_to_meter[dpid][in_port] = self.n_meter[dpid]
-            match   = parser.OFPMatch(in_port=in_port)
+            match = parser.OFPMatch(in_port=in_port)
             # run thread to avoid performance decreasing
-            # hub.spawn(self._add_qos, datapath, 1, match, self.n_meter[dpid], self.default_rate)
             t1 = Timer(0.5, self._add_qos, args=[datapath, 1, match, self.n_meter[dpid], self.default_rate])
             t1.start()
-
 
         # search if there is a rule for the src
         if src in self.subs:
             # search if there is a existing meter already
             if src not in self.src_to_meter[dpid]:
-                # thread = threading.Thread(target=self._new_sub, args=(datapath, src, in_port, ))
-                # thread.start()
                 self.n_meter[dpid] += 1
                 self.src_to_meter[dpid][src] = self.n_meter[dpid]
                 self.meter_to_src[dpid][self.n_meter[dpid]] = src
-                # hub.spawn(self._new_sub, datapath, src, in_port )
                 t2 = Timer(0.5, self._new_sub, args=[datapath, src, in_port])
                 t2.start()
 
@@ -317,6 +312,8 @@ class SimpleSwitch13(app_manager.RyuApp):
         partOfWhole = 0
         leftOver = 0
         minRate = 5000
+        K_f = 1.5
+        R_f = 0.5
         if totalRequested < bandwith:
             allocated = requested.copy()
             leftOver = bandwith - totalRequested
@@ -324,7 +321,7 @@ class SimpleSwitch13(app_manager.RyuApp):
             requestedMod = requested.copy()
             defaultRate = []
             for src in requested:
-                tmp = int((used.get(src, requested[src]*0.5/1.5)*1.5))
+                tmp = int((used.get(src, requested[src]*R_f/K_f)*K_f))
                 if tmp < requested[src]:
                     requestedMod[src] = tmp
                 if requestedMod[src] < minRate:
@@ -355,6 +352,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                                  leftOver-=1
                     else:
                         maxDiff = 0
+                        tempI = 0
                         for src in requested:
                             if requested[src] - allocated[src] > maxDiff and src not in defaultRate:
                                 maxDiff = requested[src] - allocated[src]
