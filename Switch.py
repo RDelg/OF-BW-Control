@@ -374,6 +374,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         in_port = msg.match.get('in_port', None)
         mid = self.src_to_meter[dpid][src]
 
+        # deleting dictionaries
         del self.meter_speed[dpid][mid]
         del self.meter_prev[dpid][mid]
         del self.time_prev[dpid][mid]
@@ -384,8 +385,11 @@ class SimpleSwitch13(app_manager.RyuApp):
         del self.rate_used[dpid][in_port][src]
         del self.rate_used_mod[dpid][in_port][src]
 
+        # deleting meter
         cmd = ofp.OFPMC_DELETE
         self._mod_meter_entry(dp, cmd, mid, 0)
+        # modifying other meters 
+        self._mod_port_meters(dpid, in_port)
 
         if msg.reason == ofp.OFPRR_IDLE_TIMEOUT:
             reason = 'IDLE TIMEOUT'
