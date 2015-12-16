@@ -7,10 +7,12 @@ INICIO=${2-1}
 FIN=${3-10}
 INTERVALO=${4-1}
 
+rm iperf.txt
+
 for VARIABLE in $(eval echo "{$INICIO..$FIN..$INTERVALO}") 
 do
-		echo -n $(VARIABLE), $(date +%s), 
+		echo -n ${VARIABLE}, $(date +%s), >> iperf.txt
         iperf -c ${DESTINO} -t 20 -u -b ${VARIABLE}M
         echo $(date +%s) 
-        sleep 10
+        sleep 10 >> iperf.txt
 done
