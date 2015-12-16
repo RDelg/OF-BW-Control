@@ -1,3 +1,5 @@
+#!/usr/bin/bash
+
 sudo ovs-ofctl -O OpenFlow13 add-meter unix:/tmp/s1 meter=1,kbps,band=type=drop,rate=15000
 sudo ovs-ofctl -O OpenFlow13 add-meter unix:/tmp/s1 meter=2,kbps,band=type=drop,rate=30000
 sudo ovs-ofctl -O OpenFlow13 add-meter unix:/tmp/s1 meter=3,kbps,band=type=drop,rate=20000
