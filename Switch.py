@@ -119,7 +119,6 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.logger.info('datapath         meter_id   kbps  ')
         self.logger.info('---------------- -------- --------')
 
-
         for stat in sorted(body, key=attrgetter('meter_id')):
             if stat.meter_id in self.time_prev[dpid]:
                 sleep = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9) - self.time_prev[dpid][stat.meter_id]
