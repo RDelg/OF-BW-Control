@@ -28,7 +28,7 @@ def topology():
     print " "
 
     print '*** Adding links'
-    for h in hosts1:
+    for h in hosts:
         net.addLink( s1, h )
         print ('(%s, %s) ' % (s1.name, h.name)),
     print " "
