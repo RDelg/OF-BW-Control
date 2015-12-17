@@ -11,8 +11,8 @@ rm iperf.txt
 
 for VARIABLE in $(eval echo "{$INICIO..$FIN..$INTERVALO}") 
 do
-		echo -n ${VARIABLE}, $(date +%s), >> iperf.txt
+		echo -n ${VARIABLE},$(date +%s), >> iperf.txt
         iperf -c ${DESTINO} -t 20 -u -b ${VARIABLE}M
-        echo $(date +%s) 
-        sleep 10 >> iperf.txt
+        echo $(date +%s) >> iperf.txt
+        sleep 10 
 done
