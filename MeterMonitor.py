@@ -67,7 +67,7 @@ class SimpleMonitor(app_manager.RyuApp):
         dpid = ev.msg.datapath.id
         self.logger.info('datapath         meter_id   kbps  ')
         self.logger.info('---------------- -------- --------')
-        self.output.write('%d,%d,' % (time(), dpid))
+        self.output.write('%d,%d' % (time(), dpid))
         for stat in sorted(body, key=attrgetter('meter_id')):
             if stat.meter_id in self.time_prev[dpid]:
                 sleep = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9) - self.time_prev[dpid][stat.meter_id]
@@ -78,7 +78,7 @@ class SimpleMonitor(app_manager.RyuApp):
             self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, 0), sleep)
             self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
             self.logger.info('%016x %08x %6.1f',dpid, stat.meter_id, self.meter_speed[dpid].get(stat.meter_id, 0))
-            self.output.write('%f' % self.meter_speed[dpid].get(stat.meter_id, 0))
+            self.output.write(',%f' % self.meter_speed[dpid].get(stat.meter_id, 0))
         self.output.write('\n')
 
 
