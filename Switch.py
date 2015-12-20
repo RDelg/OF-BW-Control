@@ -118,7 +118,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         dpid = ev.msg.datapath.id
         self.logger.info('datapath         meter_id   kbps  ')
         self.logger.info('---------------- -------- --------')
-
+        modified_ports = []
         for stat in sorted(body, key=attrgetter('meter_id')):
             if stat.meter_id in self.time_prev[dpid]:
                 sleep = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9) - self.time_prev[dpid][stat.meter_id]
@@ -136,11 +136,16 @@ class SimpleSwitch13(app_manager.RyuApp):
                 self.rate_used_mod[dpid].setdefault(port, {})
                 self.rate_used[dpid][port][src] = self.meter_speed[dpid][stat.meter_id]
                 if (self.rate_used[dpid][port][src] >= int(self.rate_allocated[dpid][port][src]*0.7) 
-                    and (self.rate_allocated[dpid][port][src] != self.rate_request[dpid][port][src])):
-                    self.rate_used_mod[dpid][port][src] = int(self.rate_used[dpid][port][src]*1.5)
-                    hub.spawn(self._mod_port_meters, dpid, port)
+                    and (self.rate_allocated[dpid][port][src] < self.rate_request[dpid][port][src])):
+                    if int(self.rate_allocated[dpid][port][src]*1.5) < self.rate_request[dpid][port][src]:
+                        self.rate_used_mod[dpid][port][src] = int(self.rate_allocated[dpid][port][src]*1.5)
+                    else:
+                        self.rate_used_mod[dpid][port][src] = self.rate_request[dpid][port][src]
+                    modified_ports.append(port)
                 else:
                     self.rate_used_mod[dpid][port][src] = self.rate_used[dpid][port][src]
+        for port in modified_ports:
+            hub.spawn(self._mod_port_meters, dpid, port)
 
     def _mod_port_meters(self, dpid, in_port):
         self.logger.debug('Datapath: %s modifying port %d meters', dpid, in_port)
