@@ -141,7 +141,8 @@ class SimpleSwitch13(app_manager.RyuApp):
                         self.rate_used_mod[dpid][port][src] = int(self.rate_allocated[dpid][port][src]*1.5)
                     else:
                         self.rate_used_mod[dpid][port][src] = self.rate_request[dpid][port][src]
-                    modified_ports.append(port)
+                    if port not in modified_ports:
+                        modified_ports.append(port)
                 else:
                     self.rate_used_mod[dpid][port][src] = self.rate_used[dpid][port][src]
         for port in modified_ports:
@@ -315,7 +316,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         totalUsed = sum(used.values())
         partOfWhole = 0
         leftOver = 0
-        minRate = 5000
+        minRate = 2000
         K_f = 1.5
         R_f = 0.5
         if totalRequested < bandwith:
@@ -344,7 +345,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                         leftOver += partOfWhole - requestedMod[src]
                     else:
                         allocated[src] = partOfWhole
-                while leftOver > 0:
+                while leftOver > 0 and len(defaultRate) != len(allocated):
                     stillNeed = 0
                     for src in requestedMod:
                         if (requested[src] - allocated[src]) > 0:
@@ -356,7 +357,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                                  leftOver-=1
                     else:
                         maxDiff = 0
-                        tempI = 0
+                        tempI = ''
                         for src in requested:
                             if requested[src] - allocated[src] > maxDiff and src not in defaultRate:
                                 maxDiff = requested[src] - allocated[src]
