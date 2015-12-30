@@ -25,14 +25,14 @@ class SimpleSwitch13(app_manager.RyuApp):
         with open('/home/mininet/Rene/subs.json') as data_file:    
             self.subs = json.load(data_file)
         self.max_rate = 40000
-        self.default_rate = 5000
+        self.default_rate = 2000
+        self.sleep = 10
         self.rate_request = {}
         self.rate_allocated = {}
         self.rate_used = {}
         self.rate_used_mod = {}
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
-        self.sleep = 5
         self.meter_speed = {}
         self.meter_prev = {}
         self.time_prev = {}
@@ -122,7 +122,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         for stat in sorted(body, key=attrgetter('meter_id')):
             if stat.meter_id in self.time_prev[dpid]:
                 sleep = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9) - self.time_prev[dpid][stat.meter_id]                
-                self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, stat.byte_in_count), sleep)
+                self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid][stat.meter_id], sleep)
             else:
                 self.meter_speed[dpid][stat.meter_id] = 0
             self.time_prev[dpid][stat.meter_id] = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9)
@@ -383,8 +383,9 @@ class SimpleSwitch13(app_manager.RyuApp):
 
         # deleting dictionaries
         del self.meter_speed[dpid][mid]
-        del self.meter_prev[dpid][mid]
-        del self.time_prev[dpid][mid]
+        if mid in self.meter_prev[dpid]:
+            del self.meter_prev[dpid][mid]
+            del self.time_prev[dpid][mid]
         del self.meter_to_src[dpid][mid]
         del self.src_to_meter[dpid][src]
         del self.rate_request[dpid][in_port][src]
