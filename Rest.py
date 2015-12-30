@@ -2,7 +2,7 @@ import json
 import logging
 
 # from ryu.app import simple_switch_13
-from s import SimpleSwitch13
+from Switch import SimpleSwitch13
 from webob import Response
 from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER
