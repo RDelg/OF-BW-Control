@@ -121,14 +121,13 @@ class SimpleSwitch13(app_manager.RyuApp):
         modified_ports = []
         for stat in sorted(body, key=attrgetter('meter_id')):
             if stat.meter_id in self.time_prev[dpid]:
-                sleep = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9) - self.time_prev[dpid][stat.meter_id]
+                sleep = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9) - self.time_prev[dpid][stat.meter_id]                
+                self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, stat.byte_in_count), sleep)
             else:
-                sleep = self.sleep
+                self.meter_speed[dpid][stat.meter_id] = 0
             self.time_prev[dpid][stat.meter_id] = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9)
-
-            self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, stat.byte_in_count), sleep)
             self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
-            self.logger.info("%016x %08x %6.1f",dpid, stat.meter_id, self.meter_speed[dpid].get(stat.meter_id, 0))
+            self.logger.info("%016x %08x %6.1f",dpid, stat.meter_id, self.meter_speed[dpid][stat.meter_id])
             if stat.meter_id in self.meter_to_src[dpid]:
                 src = self.meter_to_src[dpid][stat.meter_id]
                 port = self.mac_to_port[dpid][src]
@@ -144,7 +143,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                     if port not in modified_ports:
                         modified_ports.append(port)
                 else:
-                    self.rate_used_mod[dpid][port][src] = self.rate_used[dpid][port][src]
+                        self.rate_used_mod[dpid][port][src] = self.rate_used[dpid][port][src]
         for port in modified_ports:
             hub.spawn(self._mod_port_meters, dpid, port)
 
@@ -166,6 +165,9 @@ class SimpleSwitch13(app_manager.RyuApp):
         flags = dp.ofproto.OFPMF_KBPS
         bands = [dp.ofproto_parser.OFPMeterBandDrop(rate, burst_size)]
         meter_mod = dp.ofproto_parser.OFPMeterMod(dp, cmd, flags, meter_id, bands)
+        if cmd == dp.ofproto.OFPMC_MODIFY and meter_id in self.time_prev[dp.id]:
+            del self.time_prev[dp.id][meter_id]
+            del self.meter_prev[dp.id][meter_id]
         dp.send_msg(meter_mod)
 
     def _add_flow(self, datapath, priority, match, actions, table, idle_to=0, buffer_id=None):
