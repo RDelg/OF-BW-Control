@@ -18,7 +18,7 @@ class SimpleMonitor(app_manager.RyuApp):
         self.meter_speed = {}
         self.meter_prev = {}
         self.time_prev = {}
-        self.output = open('salida.txt', 'w')
+        self.output = open('monitor.csv', 'w')
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
                 [MAIN_DISPATCHER, DEAD_DISPATCHER])
@@ -75,7 +75,7 @@ class SimpleMonitor(app_manager.RyuApp):
                 sleep = self.sleep
             self.time_prev[dpid][stat.meter_id] = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9)
 
-            self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, 0), sleep)
+            self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, stat.byte_in_count), sleep)
             self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
             self.logger.info('%016x %08x %6.1f',dpid, stat.meter_id, self.meter_speed[dpid].get(stat.meter_id, 0))
             self.output.write(',%f' % self.meter_speed[dpid].get(stat.meter_id, 0))

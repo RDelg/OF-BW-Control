@@ -126,7 +126,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                 sleep = self.sleep
             self.time_prev[dpid][stat.meter_id] = float(stat.duration_sec) + (stat.duration_nsec / 10.0**9)
 
-            self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, 0), sleep)
+            self.meter_speed[dpid][stat.meter_id] = self._get_speed(stat.byte_in_count, self.meter_prev[dpid].get(stat.meter_id, stat.byte_in_count), sleep)
             self.meter_prev[dpid][stat.meter_id] = stat.byte_in_count
             self.logger.info("%016x %08x %6.1f",dpid, stat.meter_id, self.meter_speed[dpid].get(stat.meter_id, 0))
             if stat.meter_id in self.meter_to_src[dpid]:
