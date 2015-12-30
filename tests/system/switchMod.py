@@ -10,6 +10,7 @@ from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
 from ryu.lib import hub
+from time import time
 
 
 class SimpleSwitch13(app_manager.RyuApp):
@@ -36,6 +37,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.meter_speed = {}
         self.meter_prev = {}
         self.time_prev = {}
+        self.output = open('switchMod.txt', 'w')
         
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def _switch_features_handler(self, ev):
@@ -161,6 +163,11 @@ class SimpleSwitch13(app_manager.RyuApp):
                 rate    = self.rate_allocated[dpid][in_port][src]
                 match   = parser.OFPMatch(in_port=self.mac_to_port[dpid][src], eth_src=src)
                 self._mod_meter_entry(datapath, cmd, self.src_to_meter[dpid][src], rate)
+        self.output.write('%d,%d' % (time(), dpid))
+        for src in self.rate_allocated[dpid][in_port]:
+            self.output.write(',%f' % self.rate_allocated[dpid][in_port][src])
+            self.output.write(',%f' % self.rate_used[dpid][in_port][src])
+        self.output.write('\n')
 
     def _mod_meter_entry(self, dp, cmd, meter_id, rate, burst_size = 0):
         flags = dp.ofproto.OFPMF_KBPS
@@ -254,6 +261,10 @@ class SimpleSwitch13(app_manager.RyuApp):
                 self.meter_to_src[dpid][self.n_meter[dpid]] = src
                 t2 = Timer(0.5, self._new_sub, args=[datapath, src, in_port])
                 t2.start()
+                
+        self.output.write('%d,%d' % (time(), dpid))
+        self.output.write(',%f' % self.rate_used[dpid][in_port][src])
+        self.output.write('\n')
 
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port
