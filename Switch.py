@@ -166,8 +166,8 @@ class SimpleSwitch13(app_manager.RyuApp):
         bands = [dp.ofproto_parser.OFPMeterBandDrop(rate, burst_size)]
         meter_mod = dp.ofproto_parser.OFPMeterMod(dp, cmd, flags, meter_id, bands)
         if cmd == dp.ofproto.OFPMC_MODIFY and meter_id in self.time_prev[dp.id]:
-            del self.time_prev[dp.id][meter_id]
-            del self.meter_prev[dp.id][meter_id]
+            self.time_prev[dp.id][meter_id] = 0
+            self.meter_prev[dp.id][meter_id] = 0
         dp.send_msg(meter_mod)
 
     def _add_flow(self, datapath, priority, match, actions, table, idle_to=0, buffer_id=None):
