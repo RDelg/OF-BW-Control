@@ -1,15 +1,15 @@
 import json
 import logging
 
-# from ryu.app import simple_switch_13
-from Switch import SimpleSwitch13
 from webob import Response
+from ryu.app.simple_switch_13 import SimpleSwitch13
 from ryu.controller import ofp_event
-from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
+from ryu.controller.handler import MAIN_DISPATCHER, CONFIG_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.app.wsgi import ControllerBase, WSGIApplication, route
 from ryu.lib import dpid as dpid_lib
 from ryu.lib import hub
+
 
 simple_switch_instance_name = 'simple_switch_api_app'
 
@@ -21,8 +21,24 @@ class SimpleSwitchRest13(SimpleSwitch13):
         super(SimpleSwitchRest13, self).__init__(*args, **kwargs)
         wsgi = kwargs['wsgi']
         wsgi.register(SimpleSwitchController, {simple_switch_instance_name : self})
+        self.datapaths = {}
         self.lock = hub.Event()
         self.flows = []
+
+    @set_ev_cls(ofp_event.EventOFPStateChange, [MAIN_DISPATCHER, DEAD_DISPATCHER])
+    def _state_change_handler(self, ev):
+        datapath = ev.datapath
+        if ev.state == MAIN_DISPATCHER:
+            if not datapath.id in self.datapaths:
+                self.logger.debug('register datapath: %016x', datapath.id)
+                self.datapaths[datapath.id] = datapath
+                self.mac_to_port[datapath.id]   = {}
+
+        elif ev.state == DEAD_DISPATCHER:
+            if datapath.id in self.datapaths:
+                self.logger.debug('unregister datapath: %016x', datapath.id)
+                del self.datapaths[datapath.id]
+                del self.mac_to_port[datapath.id]
 
     def send_flow_request(self, datapath):
         self.logger.debug('send flow request: %016x', datapath.id)
@@ -72,22 +88,6 @@ class SimpleSwitchController(ControllerBase):
 		body = json.dumps(mac_table, indent=4, sort_keys=True)
 		return Response(content_type='application/json', body=body)
 
-	@route('simpleswitch', '/bandwidth/{dpid}' , methods=['GET'], requirements={'dpid': dpid_lib.DPID_PATTERN})
-	def list_bandwidth_table(self, req, **kwargs):
-
-		simple_switch = self.simpl_switch_spp
-		dpid = dpid_lib.str_to_dpid(kwargs['dpid'])
-
-		if dpid not in simple_switch.mac_to_port:
-			return Response(status=404)
-
-		bandwidth = {}
-		bandwidth['Requested'] = simple_switch.rate_request.get(dpid, {})
-		bandwidth['Allocated'] = simple_switch.rate_allocated.get(dpid, {})
-		bandwidth['Used'] = simple_switch.rate_used.get(dpid, {})
-		body = json.dumps(bandwidth, indent=4, sort_keys=True)
-		return Response(content_type='application/json', body=body)
-
 	@route('simpleswitch', '/flows/{dpid}' , methods=['GET'], requirements={'dpid': dpid_lib.DPID_PATTERN})
 	def list_flows(self, req, **kwargs):
 
@@ -100,4 +100,20 @@ class SimpleSwitchController(ControllerBase):
 		return Response(content_type='application/json', body=body)
 
 
-
+# 	flows = []
+# 	    body = ev.msg.body
+# 	    for stat in sorted(body, key=attrgetter('table_id')):
+# 	    	flow = {'table_id': stat.table_id,
+# 					'duration_sec': stat.duration_sec, 
+# 					'duration_nsec': stat.duration_nsec,
+# 					'priority': stat.priority,
+# 					'idle_timeout': stat.idle_timeout,
+# 					'hard_timeout': stat.hard_timeout, 
+# 					'flags': stat.flags,
+# 					'cookie': stat.cookie,
+# 					'packet_count': stat.packet_count,
+# 					'byte_count': stat.byte_count,
+# 					'match': stat.match,
+# 					'instructions': stat.instructions
+# 	    			}
+# 	    	flows.append(flow)
