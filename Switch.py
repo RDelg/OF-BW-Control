@@ -224,8 +224,8 @@ class SimpleSwitch13(app_manager.RyuApp):
         parser   = datapath.ofproto_parser
         in_port  = msg.match['in_port']
 
-        # ignore local port
-        if in_port == 4294967294:
+        # ignore local port (4294967294)
+        if in_port == 0xfffffffe:
             return
 
         pkt = packet.Packet(msg.data)
