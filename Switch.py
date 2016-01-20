@@ -1,4 +1,5 @@
 import json
+import os
 from threading import Thread, Timer
 from operator import attrgetter
 from ryu.base import app_manager
@@ -11,6 +12,7 @@ from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
 from ryu.lib import hub
 
+PATH = os.path.dirname(__file__)
 
 class SimpleSwitch13(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -22,7 +24,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.meter_to_src = {}
         self.n_meter = {}
         self.port_to_meter = {}
-        with open('/home/mininet/Rene/subs.json') as data_file:    
+        with open(PATH + '/subs.json') as data_file:    
             self.subs = json.load(data_file)
         self.max_rate = 40000
         self.default_rate = 2000
